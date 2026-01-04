@@ -78,14 +78,13 @@ void attd_call(void *target_addr, int argNum, ...) {
   LOGS("attd_call start %p", target_addr);
   uint8_t *fakestack;
   auto vm_ = new vm();
-  auto qvm = vm_->init(target_addr);
+  auto qvm = vm_->init(target_addr,true);
   auto state = qvm.getGPRState();
   QBDI::allocateVirtualStack(state, STACK_SIZE, &fakestack);
   QBDI::rword ret;
   va_list args;
   va_start(args, argNum);
-  va_list ap;
-  qvm.callV(&ret, (QBDI::rword)target_addr, argNum, ap);
+  qvm.switchStackAndCallV(&ret, (QBDI::rword)target_addr, argNum, args);
   va_end(args);
 
   LOGS("attd_call end %p", target_addr);
