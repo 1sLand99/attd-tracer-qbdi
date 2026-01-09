@@ -33,10 +33,39 @@ void syn_reg_gum(GumCpuContext *cpu, QBDI::GPRState *state, bool F2Q) {
   }
 }
 
+
+void print_current_stack(const char* tag,GumCpuContext * cpu_context)
+{
+    LOGS("=== Stack Trace (%s) ===\n", tag);
+    
+    GumInvocationStack *stack = gum_interceptor_get_current_stack();
+  
+    // 使用 gum_backtrace 来获取堆栈
+    GumBacktracer *backtracer = gum_backtracer_make_accurate();
+    if (backtracer != NULL) {
+        GumReturnAddressArray ret_addrs;
+        gum_backtracer_generate(backtracer, cpu_context, &ret_addrs);
+        
+        for (guint i = 0; i < ret_addrs.len; i++) {
+            // printf("[%2u] 0x%016" G_GINT64_MODIFIER "x", i, ret_addrs.items[i]);
+            GumDebugSymbolDetails symbol_details;
+            auto ret = gum_symbol_details_from_address((void*)ret_addrs.items[i], &symbol_details);
+            if (ret) {
+                LOGS("%p %lx %s %s", ret_addrs.items[i], symbol_details.address, symbol_details.symbol_name, symbol_details.module_name);
+            }
+        }
+        
+        g_object_unref(backtracer);
+    }
+    
+    LOGS("========================\n\n");
+}
+
 bool isTraceAll = false;
 
 // hook
 HOOK_DEF(QBDI::rword, gum_handle) {
+  
   LOGS("begin");
   clock_t start, end;
   start = clock();
@@ -45,6 +74,9 @@ HOOK_DEF(QBDI::rword, gum_handle) {
       (GumInterceptor *)gum_invocation_context_get_replacement_data(context);
   gum_interceptor_revert(interceptor, context->function);
   gum_interceptor_flush(interceptor);
+  print_current_stack("gum_handle",context->cpu_context);
+
+  LOGS("lr %lx",context->cpu_context->lr);
   auto vm_ = new vm();
   auto qvm = vm_->init(context->function, isTraceAll);
   auto state = qvm.getGPRState();
@@ -83,6 +115,9 @@ void attd_call(void *target_addr, int argNum, ...) {
   QBDI::allocateVirtualStack(state, STACK_SIZE, &fakestack);
   QBDI::rword ret;
   va_list args;
+  uint32_t stub_code[3] = {0xd61f0200,0x58000050,0x2a};
+  state->lr = (uint64_t)&stub_code;
+  
   va_start(args, argNum);
   qvm.switchStackAndCallV(&ret, (QBDI::rword)target_addr, argNum, args);
   va_end(args);
@@ -212,11 +247,12 @@ void init_attd_config_from_file(const char* f){
         fclose(file);
         return;
     }
-    
+
     // 将字符串转换为枚举值
-    if (token == "hook") {
+    int mode_int = safe_stoi(token);
+    if (mode_int == 0) {
         _config.mode = ATTD_MODE_HOOK;
-    } else if (token == "call") {
+    } else if (mode_int == 1) {
         _config.mode = ATTD_MODE_CALL;
     } else {
         LOGE("配置文件格式错误: mode必须是'hook'或'call'");
